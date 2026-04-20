@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Das Historische Kasino — HG Section Européenne Allemand</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f5f4f0;
+      color: #1a1a1a;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    #app {
+      width: 100%;
+      max-width: 680px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .hk-anim { animation: fadeIn 0.3s ease both; }
+    .hk-theme-card { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+    .hk-theme-card:hover { border-color: #888 !important; background: #f0efeb !important; }
+    .hk-btn { cursor: pointer; transition: background 0.12s, opacity 0.12s; font-family: inherit; }
+    .hk-btn:hover:not(:disabled) { background: #e8e7e3 !important; }
+    .hk-btn:active:not(:disabled) { transform: scale(0.98); }
+    .hk-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    textarea.hk-ta { outline: none; }
+    textarea.hk-ta:focus { border-color: #3b82f6 !important; }
+
+    /* Colors */
+    :root {
+      --bg: #f5f4f0;
+      --bg2: #ededea;
+      --bg3: #ffffff;
+      --border: rgba(0,0,0,0.12);
+      --border2: rgba(0,0,0,0.22);
+      --text: #1a1a1a;
+      --text2: #555;
+      --text3: #888;
+      --info-bg: #e6f1fb;
+      --info-text: #042c53;
+      --info-border: #185fa5;
+      --success-bg: #eaf3de;
+      --success-text: #173404;
+      --success-border: #3b6d11;
+      --warning-bg: #faeeda;
+      --warning-text: #412402;
+      --warning-border: #854f0b;
+      --danger-bg: #fcebeb;
+      --danger-text: #501313;
+      --danger-border: #a32d2d;
+    }
+    @media (prefers-color-scheme: dark) {
+      body { background: #1c1c1a; color: #e8e7e3; }
+      :root {
+        --bg: #1c1c1a;
+        --bg2: #252523;
+        --bg3: #2e2e2b;
+        --border: rgba(255,255,255,0.1);
+        --border2: rgba(255,255,255,0.2);
+        --text: #e8e7e3;
+        --text2: #aaa;
+        --text3: #777;
+        --info-bg: #0c2a47;
+        --info-text: #b5d4f4;
+        --info-border: #185fa5;
+        --success-bg: #17340a;
+        --success-text: #c0dd97;
+        --success-border: #3b6d11;
+        --warning-bg: #412402;
+        --warning-text: #fac775;
+        --warning-border: #854f0b;
+        --danger-bg: #501313;
+        --danger-text: #f7c1c1;
+        --danger-border: #a32d2d;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <script>
+    const THEMES = [
+      { id:"weimar", fr:"République de Weimar", de:"Weimarer Republik", period:"1919–1933", icon:"W", keys:["Demokratie","Inflation","Hindenburg","NSDAP"] },
+      { id:"iireich", fr:"IIIᵉ Reich & WWII", de:"Drittes Reich & Weltkrieg", period:"1933–1945", icon:"III", keys:["Nationalsozialismus","Holocaust","Wehrmacht","Propaganda"] },
+      { id:"gfroide", fr:"Guerre froide & Berlin divisé", de:"Kalter Krieg / geteiltes Berlin", period:"1947–1989", icon:"★", keys:["BRD","DDR","Berliner Mauer","NATO"] },
+      { id:"mauer", fr:"Chute du Mur & Réunification", de:"Mauerfall & Wiedervereinigung", period:"1989–1990", icon:"▲", keys:["Mauerfall","Wiedervereinigung","Kohl","Treuhandanstalt"] },
+      { id:"europe", fr:"Construction européenne", de:"Europäische Integration", period:"1950–auj.", icon:"€", keys:["Schuman","Binnenmarkt","EU","Euro"] },
+      { id:"geo", fr:"L'Allemagne dans l'UE", de:"Deutschland in der EU", period:"Géographie", icon:"◆", keys:["Bundesländer","Wirtschaftsmacht","Migration","Energiewende"] },
+    ];
+    const DIFFS = [
+      { id:"2nde", label:"Seconde", sub:"Notions fondamentales" },
+      { id:"1ere", label:"Première", sub:"Analyse approfondie" },
+      { id:"tle", label:"Terminale / DNL", sub:"Maîtrise & argumentation" },
+    ];
+
+    let state = {
+      phase: "lobby",
+      theme: null,
+      difficulty: "1ere",
+      questionData: null,
+      answer: "",
+      evalData: null,
+      score: { points: 0, total: 0 },
+      error: null
+    };
+
+    function setState(patch) {
+      state = { ...state, ...patch };
+      render();
+    }
+
+    async function generateQuestion() {
+      if (!state.theme) return;
+      setState({ phase:"generating", error:null });
+      try {
+        const t = state.theme, d = state.difficulty;
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:1000,
+            system:`Tu es un professeur d'histoire-géographie expert dans un lycée français, spécialisé en section européenne allemand. Génère une question précise et stimulante pour le niveau ${d}. Intègre des termes et concepts en allemand. Réponds UNIQUEMENT en JSON valide sans markdown ni backticks, format exact: {"question":"...","contexte":"...","termes_cles":["terme (traduction)","terme (traduction)"],"points_attendus":["point1","point2","point3","point4"]}`,
+            messages:[{ role:"user", content:`Thème: ${t.fr} — ${t.de} (${t.period})\nNiveau: ${d}\nMots-clés du programme: ${t.keys.join(", ")}` }]
+          })
+        });
+        const data = await res.json();
+        const raw = data.content.find(c=>c.type==="text")?.text || "";
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (!m) throw new Error("JSON invalide");
+        const parsed = JSON.parse(m[0]);
+        setState({ questionData:parsed, answer:"", evalData:null, phase:"question" });
+      } catch(e) {
+        setState({ error:"Erreur lors de la génération. Vérifiez votre connexion et réessayez.", phase:"lobby" });
+      }
+    }
+
+    async function evaluateAnswer() {
+      if (!state.answer.trim() || !state.questionData) return;
+      setState({ phase:"evaluating", error:null });
+      try {
+        const q = state.questionData;
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            model:"claude-sonnet-4-20250514",
+            max_tokens:1000,
+            system:`Tu es un correcteur bienveillant en histoire-géographie, section européenne allemand (lycée français). Évalue la réponse de l'élève de manière constructive. Réponds UNIQUEMENT en JSON valide sans markdown ni backticks, format exact: {"note":X,"appreciation":"...","feedback":"...","points_reussis":["..."],"points_ameliorer":["..."],"vocabulaire_conseille":["terme_allemand (fr): usage"]}`,
+            messages:[{ role:"user", content:`Question: ${q.question}\nPoints attendus: ${q.points_attendus.join("; ")}\nRéponse de l'élève: ${state.answer}\nNiveau: ${state.difficulty}` }]
+          })
+        });
+        const data = await res.json();
+        const raw = data.content.find(c=>c.type==="text")?.text || "";
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (!m) throw new Error("JSON invalide");
+        const parsed = JSON.parse(m[0]);
+        setState({
+          evalData: parsed,
+          score: { points: state.score.points + (parsed.note||0), total: state.score.total + 10 },
+          phase: "result"
+        });
+      } catch(e) {
+        setState({ error:"Erreur lors de l'évaluation. Réessayez.", phase:"question" });
+      }
+    }
+
+    function el(tag, attrs, ...children) {
+      const e = document.createElement(tag);
+      if (attrs) {
+        for (const [k,v] of Object.entries(attrs)) {
+          if (k === "style" && typeof v === "object") Object.assign(e.style, v);
+          else if (k.startsWith("on")) e.addEventListener(k.slice(2).toLowerCase(), v);
+          else e.setAttribute(k, v);
+        }
+      }
+      for (const c of children.flat()) {
+        if (c == null) continue;
+        e.append(typeof c === "string" ? document.createTextNode(c) : c);
+      }
+      return e;
+    }
+
+    function render() {
+      const app = document.getElementById("app");
+      app.innerHTML = "";
+
+      const scoreHtml = state.score.total > 0
+        ? el("div", { style:{display:"inline-flex",alignItems:"center",gap:"6px",padding:"4px 12px",borderRadius:"8px",background:"var(--success-bg)",color:"var(--success-text)",fontSize:"13px",fontWeight:"500",border:"0.5px solid var(--success-border)"} }, `${state.score.points}/${state.score.total} pts`)
+        : null;
+
+      const header = el("div", { style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"1.5rem"} },
+        el("div", null,
+          el("h1", { style:{fontFamily:"Georgia, serif",fontSize:"26px",fontWeight:"600",color:"var(--text)",margin:"0 0 2px",letterSpacing:"-0.5px"} }, "Das Historische Kasino"),
+          el("p", { style:{fontSize:"12px",color:"var(--text2)",margin:0,fontStyle:"italic"} }, "Quiz IA · Histoire-Géographie · Section Européenne Allemand")
+        ),
+        scoreHtml || el("span")
+      );
+      app.appendChild(header);
+
+      if (state.error) {
+        app.appendChild(el("div", { style:{padding:"0.75rem 1rem",background:"var(--danger-bg)",borderRadius:"8px",marginBottom:"1rem",color:"var(--danger-text)",fontSize:"13px",border:"0.5px solid var(--danger-border)"} }, state.error));
+      }
+
+      /* ── LOBBY ── */
+      if (state.phase === "lobby") {
+        const sec = el("div", { class:"hk-anim" });
+        sec.appendChild(el("p", { style:{fontSize:"12px",color:"var(--text2)",margin:"0 0 10px",fontWeight:"600",textTransform:"uppercase",letterSpacing:"0.7px"} }, "Choisissez un thème"));
+
+        const grid = el("div", { style:{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(190px, 1fr))",gap:"10px",marginBottom:"1.25rem"} });
+        THEMES.forEach(t => {
+          const selected = state.theme?.id === t.id;
+          const card = el("div", {
+            class:"hk-theme-card",
+            style:{padding:"0.875rem",borderRadius:"12px",border:`${selected?"2px":"0.5px"} solid ${selected?"var(--info-border)":"var(--border)"}`,background:selected?"var(--info-bg)":"var(--bg3)"},
+            onclick:() => setState({ theme:t })
+          },
+            el("div", { style:{fontFamily:"Georgia, serif",fontSize:"18px",fontWeight:"600",color:"var(--info-text)",marginBottom:"5px"} }, t.icon),
+            el("p", { style:{fontSize:"13px",fontWeight:"600",color:"var(--text)",margin:"0 0 1px"} }, t.fr),
+            el("p", { style:{fontSize:"11px",color:"var(--text2)",margin:"0 0 2px",fontStyle:"italic"} }, t.de),
+            el("p", { style:{fontSize:"10px",color:"var(--text3)",margin:"0 0 6px"} }, t.period),
+            el("div", { style:{display:"flex",flexWrap:"wrap",gap:"3px"} },
+              ...t.keys.slice(0,2).map(k => el("span", { style:{fontSize:"10px",padding:"1px 6px",borderRadius:"10px",background:"var(--bg2)",color:"var(--text2)",fontStyle:"italic"} }, k))
+            )
+          );
+          grid.appendChild(card);
+        });
+        sec.appendChild(grid);
+
+        sec.appendChild(el("p", { style:{fontSize:"12px",color:"var(--text2)",margin:"0 0 8px",fontWeight:"600",textTransform:"uppercase",letterSpacing:"0.7px"} }, "Niveau"));
+        const diffRow = el("div", { style:{display:"flex",gap:"6px",flexWrap:"wrap",marginBottom:"1.25rem"} });
+        DIFFS.forEach(d => {
+          const sel = state.difficulty === d.id;
+          const btn = el("button", {
+            class:"hk-btn",
+            style:{padding:"6px 14px",borderRadius:"8px",border:`0.5px solid ${sel?"var(--info-border)":"var(--border2)"}`,background:sel?"var(--info-bg)":"transparent",color:sel?"var(--info-text)":"var(--text2)",fontSize:"13px"},
+            onclick:() => setState({ difficulty:d.id })
+          }, el("span",{style:{fontWeight:"600"}},d.label), ` · ${d.sub}`);
+          diffRow.appendChild(btn);
+        });
+        sec.appendChild(diffRow);
+
+        const goBtn = el("button", {
+          class:"hk-btn",
+          disabled: !state.theme,
+          style:{padding:"9px 20px",borderRadius:"8px",border:"0.5px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:"14px",fontWeight:"600"},
+          onclick: generateQuestion
+        }, state.theme ? `Tirer une question — ${state.theme.fr} ↗` : "Sélectionnez un thème pour commencer");
+        sec.appendChild(goBtn);
+        app.appendChild(sec);
+      }
+
+      /* ── SPINNER ── */
+      if (state.phase === "generating" || state.phase === "evaluating") {
+        const spinner = el("div", { style:{display:"flex",flexDirection:"column",alignItems:"center",padding:"3rem 0",gap:"12px"} });
+        const wheel = el("div", { style:{width:"28px",height:"28px",border:"2px solid var(--border)",borderTop:"2px solid var(--text2)",borderRadius:"50%",animation:"spin 0.8s linear infinite"} });
+        const msg = el("p", { style:{color:"var(--text2)",fontSize:"13px",margin:0} },
+          state.phase === "generating" ? "Génération de la question par l'IA…" : "Évaluation de votre réponse…");
+        spinner.append(wheel, msg);
+        app.appendChild(spinner);
+      }
+
+      /* ── QUESTION ── */
+      if (state.phase === "question" && state.questionData) {
+        const q = state.questionData;
+        const sec = el("div", { class:"hk-anim" });
+
+        sec.appendChild(el("div", { style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"1rem"} },
+          el("span",{style:{fontSize:"11px",color:"var(--text2)"}}, `${state.theme.fr} · ${state.theme.de}`),
+          el("span",{style:{fontSize:"11px",padding:"1px 8px",borderRadius:"10px",background:"var(--info-bg)",color:"var(--info-text)"}}, state.difficulty)
+        ));
+
+        const qCard = el("div",{style:{padding:"1.25rem",borderRadius:"12px",border:"0.5px solid var(--border)",background:"var(--bg3)",marginBottom:"0.875rem"}});
+        qCard.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"600",color:"var(--text2)",textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:"8px"}},"Question"));
+        qCard.appendChild(el("p",{style:{fontSize:"15px",lineHeight:"1.65",color:"var(--text)",margin:"0 0 0.875rem"}},q.question));
+        if (q.contexte) {
+          qCard.appendChild(el("p",{style:{fontSize:"13px",color:"var(--text2)",fontStyle:"italic",borderLeft:"2px solid var(--border2)",paddingLeft:"10px",margin:"0 0 0.875rem"}},q.contexte));
+        }
+        if (q.termes_cles?.length) {
+          qCard.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"600",color:"var(--text2)",textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:"6px"}},"Vocabulaire à mobiliser"));
+          const tagRow = el("div",{style:{display:"flex",flexWrap:"wrap",gap:"5px"}});
+          q.termes_cles.forEach(t => tagRow.appendChild(el("span",{style:{padding:"3px 10px",borderRadius:"20px",fontSize:"12px",background:"var(--bg2)",color:"var(--text2)",border:"0.5px solid var(--border)",fontStyle:"italic"}},t)));
+          qCard.appendChild(tagRow);
+        }
+        sec.appendChild(qCard);
+
+        sec.appendChild(el("p",{style:{fontSize:"12px",color:"var(--text2)",margin:"0 0 6px",fontWeight:"600",textTransform:"uppercase",letterSpacing:"0.7px"}},"Votre réponse"));
+        const ta = el("textarea",{
+          class:"hk-ta",
+          placeholder:"Rédigez votre réponse ici… Pensez à utiliser les termes allemands du programme.",
+          style:{width:"100%",minHeight:"120px",padding:"10px 12px",borderRadius:"8px",border:"0.5px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:"14px",lineHeight:"1.6",fontFamily:"inherit",resize:"vertical",display:"block"},
+          oninput: e => { state.answer = e.target.value; }
+        });
+        ta.value = state.answer;
+        sec.appendChild(ta);
+
+        const btnRow = el("div",{style:{display:"flex",gap:"8px",marginTop:"0.875rem",flexWrap:"wrap"}});
+        const evalBtn = el("button",{
+          class:"hk-btn",
+          id:"eval-btn",
+          style:{padding:"9px 20px",borderRadius:"8px",border:"0.5px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:"14px",fontWeight:"600"},
+          onclick: evaluateAnswer
+        }, "Faire évaluer ma réponse ↗");
+        if (!state.answer.trim()) evalBtn.disabled = true;
+        ta.addEventListener("input", e => { evalBtn.disabled = !e.target.value.trim(); });
+
+        const backBtn = el("button",{
+          class:"hk-btn",
+          style:{padding:"9px 16px",borderRadius:"8px",border:"0.5px solid var(--border)",background:"transparent",color:"var(--text2)",fontSize:"13px"},
+          onclick:()=>setState({phase:"lobby",answer:"",questionData:null,error:null})
+        },"← Changer de thème");
+        btnRow.append(evalBtn, backBtn);
+        sec.appendChild(btnRow);
+        app.appendChild(sec);
+      }
+
+      /* ── RESULT ── */
+      if (state.phase === "result" && state.evalData) {
+        const ev = state.evalData;
+        const note = ev.note || 0;
+        const noteColor = note >= 7 ? "success" : note >= 5 ? "warning" : "danger";
+        const sec = el("div",{class:"hk-anim"});
+
+        sec.appendChild(el("div",{style:{display:"flex",alignItems:"center",gap:"16px",marginBottom:"1.25rem"}},
+          el("div",{style:{width:"54px",height:"54px",borderRadius:"50%",border:`2px solid var(--${noteColor}-border)`,background:`var(--${noteColor}-bg)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"17px",fontWeight:"600",color:`var(--${noteColor}-text)`,flexShrink:"0"}},`${note}/10`),
+          el("div",null,
+            el("p",{style:{margin:"0 0 2px",fontWeight:"600",fontSize:"15px",color:"var(--text)"}},ev.appreciation||""),
+            el("p",{style:{margin:0,fontSize:"11px",color:"var(--text2)"}},`${state.theme.fr} · ${state.difficulty}`)
+          )
+        ));
+
+        const feedCard = el("div",{style:{padding:"1rem 1.25rem",borderRadius:"12px",border:"0.5px solid var(--border)",background:"var(--bg3)",marginBottom:"8px"}});
+        feedCard.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"600",color:"var(--text2)",textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:"6px"}},"Appréciation"));
+        feedCard.appendChild(el("p",{style:{fontSize:"13px",lineHeight:"1.6",color:"var(--text)",margin:0}},ev.feedback||""));
+        sec.appendChild(feedCard);
+
+        function feedSection(label, items, type) {
+          if (!items?.length) return null;
+          const s = el("div",{style:{padding:"0.75rem 1rem",borderRadius:"8px",background:`var(--${type}-bg)`,marginBottom:"8px",border:`0.5px solid var(--${type}-border)`}});
+          s.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"600",color:`var(--${type}-text)`,textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:"5px"}},label));
+          const ul = el("ul",{style:{margin:"0",paddingLeft:"16px"}});
+          items.forEach(p => ul.appendChild(el("li",{style:{fontSize:"13px",color:"var(--text)",lineHeight:"1.55",marginBottom:"2px"}},p)));
+          s.appendChild(ul);
+          return s;
+        }
+        [feedSection("Points maîtrisés", ev.points_reussis, "success"),
+         feedSection("À approfondir", ev.points_ameliorer, "warning")].forEach(n => n && sec.appendChild(n));
+
+        if (ev.vocabulaire_conseille?.length) {
+          const vocBox = el("div",{style:{padding:"0.75rem 1rem",borderRadius:"8px",background:"var(--info-bg)",marginBottom:"1.25rem",border:"0.5px solid var(--info-border)"}});
+          vocBox.appendChild(el("div",{style:{fontSize:"10px",fontWeight:"600",color:"var(--info-text)",textTransform:"uppercase",letterSpacing:"0.7px",marginBottom:"7px"}},"Vocabulaire allemand à maîtriser"));
+          const tags = el("div",{style:{display:"flex",flexWrap:"wrap",gap:"5px"}});
+          ev.vocabulaire_conseille.forEach(v => tags.appendChild(el("span",{style:{padding:"3px 10px",borderRadius:"20px",fontSize:"12px",background:"var(--bg3)",color:"var(--text2)",border:"0.5px solid var(--border)",fontStyle:"italic"}},v)));
+          vocBox.appendChild(tags);
+          sec.appendChild(vocBox);
+        }
+
+        const btnRow = el("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap"}});
+        const newBtn = el("button",{
+          class:"hk-btn",
+          style:{padding:"9px 20px",borderRadius:"8px",border:"0.5px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:"14px",fontWeight:"600"},
+          onclick:()=>setState({phase:"lobby",answer:"",questionData:null,evalData:null,error:null})
+        },"← Nouveau thème");
+        const sameBtn = el("button",{
+          class:"hk-btn",
+          style:{padding:"9px 20px",borderRadius:"8px",border:"0.5px solid var(--border2)",background:"var(--bg3)",color:"var(--text)",fontSize:"13px"},
+          onclick:()=>{ setState({answer:"",evalData:null,questionData:null,error:null}); generateQuestion(); }
+        },"Même thème, nouvelle question ↗");
+        btnRow.append(newBtn, sameBtn);
+        sec.appendChild(btnRow);
+        app.appendChild(sec);
+      }
+    }
+
+    render();
+  </script>
+</body>
+</html>
